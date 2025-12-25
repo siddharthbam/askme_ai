@@ -47,9 +47,8 @@ cd frontend
 npm install
 npm start
 ```
-🤖 AI Usage
-Embeddings: all-MiniLM-L6-v2 converts text into 384-dimensional vectors.
+## 🤖 AI Stack Details
 
-LLM: Mistral-7B-Instruct-v0.2 synthesizes answers based only on provided context to prevent hallucinations.
-
-Retrieval: Leverages the RetrievalQA chain to automate the look-up and prompt-construction process.
+* **Embeddings**: all-MiniLM-L6-v2 (Converts text into 384-dimensional vectors).
+* **LLM**: Mistral-7B-Instruct-v0.2 (Synthesizes answers based strictly on provided context).
+* **Retrieval**: Leverages the RetrievalQA chain from LangChain to automate the prompt-construction process.
