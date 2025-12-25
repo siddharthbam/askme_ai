@@ -7,7 +7,7 @@
 ## 🏗 Architecture
 The system follows a decoupled **Client-Server** architecture optimized for AI workloads:
 
-* **Frontend**: Built with **React.js**, featuring a "Gemini-inspired" chat interface and a custom-designed sidebar for "Knowledge Base" management.
+* **Frontend**: Built with **React.js**, featuring a chat interface and a custom-designed sidebar for "Knowledge Base" management.
 * **Backend**: A **Flask (Python)** server handling file processing (PDF/Docx), document indexing, and AI model orchestration.
 * **AI Engine**: Powered by **LangChain** and **Mistral-7B-Instruct-v0.2** (via Hugging Face) for natural language generation.
 * **Vector Store**: Uses **FAISS** for fast semantic retrieval of document chunks.
@@ -17,10 +17,6 @@ The system follows a decoupled **Client-Server** architecture optimized for AI w
 ---
 
 ## 🧠 Key Decisions & Challenges
-
-### 🎨 Design & Proportionality
-* **Visual Balance**: Refined CSS margins to group the "Brand Unit" (Logo + Title) closer together (**8px** gap) for a more cohesive visual identity.
-* **Branding**: Implemented a warm, off-white sidebar (**#f6f6ea**) to provide a sophisticated "paper-like" feel that contrasts with the clean white chat area.
 
 ### 🛠 Technical Security
 * **Environment Variables**: Migrated from hardcoded API tokens to **OS-level environment variables** (`HF_TOKEN`) using `python-dotenv` to follow industry security standards.
