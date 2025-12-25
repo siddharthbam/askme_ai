@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
 
+// This line tells the app: "Use the Vercel variable if it exists, otherwise use Localhost"
+const API_URL = process.env.REACT_APP_BACKEND_URL || "http://127.0.0.1:5000";
+
 function App() {
   const [question, setQuestion] = useState('');
   const [chatHistory, setChatHistory] = useState([]);
@@ -20,17 +23,22 @@ function App() {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await fetch('http://127.0.0.1:5000/upload', { method: 'POST', body: formData });
+      // UPDATED: Used ${API_URL}
+      const res = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
       if (res.ok) {
         setFiles(prev => [...prev, { name: file.name, type: file.name.split('.').pop() }]);
       }
-    } catch (err) { console.error("Upload error", err); } 
-    finally { setIsIndexing(false); }
+    } catch (err) { 
+      console.error("Upload error", err); 
+    } finally { 
+      setIsIndexing(false); 
+    }
   };
 
   const handleDelete = async (fileName) => {
     try {
-      const res = await fetch('http://127.0.0.1:5000/delete_file', {
+      // UPDATED: Used ${API_URL}
+      const res = await fetch(`${API_URL}/delete_file`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: fileName })
@@ -39,7 +47,9 @@ function App() {
         setFiles(prev => prev.filter(f => f.name !== fileName));
         setChatHistory([]); 
       }
-    } catch (err) { console.error("Delete error", err); }
+    } catch (err) { 
+      console.error("Delete error", err); 
+    }
   };
 
   const handleAsk = async () => {
@@ -50,7 +60,8 @@ function App() {
     setIsThinking(true);
 
     try {
-      const res = await fetch('http://127.0.0.1:5000/ask', {
+      // UPDATED: Used ${API_URL}
+      const res = await fetch(`${API_URL}/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: currentQ })
@@ -58,8 +69,10 @@ function App() {
       const data = await res.json();
       setChatHistory(prev => [...prev, { role: 'ai', content: data.answer || data.error }]);
     } catch (err) {
-      setChatHistory(prev => [...prev, { role: 'ai', content: "Connection Error." }]);
-    } finally { setIsThinking(false); }
+      setChatHistory(prev => [...prev, { role: 'ai', content: "Connection Error. Make sure the backend is awake!" }]);
+    } finally { 
+      setIsThinking(false); 
+    }
   };
 
   return (
@@ -79,8 +92,8 @@ function App() {
         </div>
 
         <label className="upload-btn">
-          <span>+ Upload Document</span>
-          <input type="file" onChange={handleUpload} hidden accept=".pdf,.docx,.txt" />
+          <span>{isIndexing ? "Indexing..." : "+ Upload Document"}</span>
+          <input type="file" onChange={handleUpload} hidden accept=".pdf,.docx,.txt" disabled={isIndexing} />
         </label>
         
         <div className="file-list">
