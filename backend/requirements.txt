@@ -7,3 +7,6 @@ faiss-cpu
 python-dotenv
 gunicorn
 python-docx
+sentence-transformers
+huggingface_hub
+langchain-community
