@@ -1,0 +1,13 @@
+flask
+flask-cors
+PyPDF2
+langchain>=0.2.0
+langchain-huggingface
+faiss-cpu
+python-dotenv
+gunicorn
+python-docx
+sentence-transformers
+huggingface_hub
+langchain-community
+pypdf
