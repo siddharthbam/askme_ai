@@ -10,5 +10,6 @@ faiss-cpu
 sentence-transformers
 huggingface-hub
 
+PyPDF2
 pypdf
 python-docx
