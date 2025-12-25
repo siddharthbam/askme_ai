@@ -38,6 +38,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 # Create a .env file and add: HF_TOKEN=your_token_here
 python app.py
+```
 
 
 ### 2. Frontend Setup
