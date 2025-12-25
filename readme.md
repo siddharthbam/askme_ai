@@ -42,12 +42,11 @@ python app.py
 
 
 ### 2. Frontend Setup
-
-
-Bash
+```bash
 cd frontend
 npm install
 npm start
+```
 🤖 AI Usage
 Embeddings: all-MiniLM-L6-v2 converts text into 384-dimensional vectors.
 
