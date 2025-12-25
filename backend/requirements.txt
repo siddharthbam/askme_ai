@@ -1,7 +1,7 @@
 flask
 flask-cors
 PyPDF2
-langchain
+langchain>=0.2.0
 langchain-huggingface
 faiss-cpu
 python-dotenv
