@@ -5,3 +5,4 @@ langchain
 langchain-huggingface
 faiss-cpu
 python-dotenv
+gunicorn
