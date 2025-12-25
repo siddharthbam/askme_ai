@@ -5,7 +5,8 @@ from flask_cors import CORS
 import PyPDF2
 from docx import Document
 from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings, HuggingFaceEndpoint, ChatHuggingFace
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.llms import HuggingFaceEndpoint
 from langchain.chains import RetrievalQA
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.prompts import PromptTemplate
@@ -69,15 +70,24 @@ def ask():
     global vector_db
     if not vector_db:
         return jsonify({"answer": "Please upload a document first!"})
+
     try:
-        data = request.get_json()
-        llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", task="conversational")
-        chat_model = ChatHuggingFace(llm=llm)
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=chat_model, retriever=vector_db.as_retriever(), chain_type_kwargs={"prompt": PROMPT}
+        data = request.get_json() or {}
+        llm = HuggingFaceEndpoint(
+            repo_id="mistralai/Mistral-7B-Instruct-v0.2",
+            huggingfacehub_api_token=hf_token,
+            temperature=0.2,
         )
-        response = qa_chain.invoke(data.get('question'))
-        return jsonify({"answer": response["result"]})
+
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=llm,
+            retriever=vector_db.as_retriever(),
+            chain_type_kwargs={"prompt": PROMPT},
+        )
+
+        response = qa_chain.invoke({"query": data.get("question", "")})
+        return jsonify({"answer": response.get("result", str(response))})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
