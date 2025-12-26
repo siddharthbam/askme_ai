@@ -1,95 +1,85 @@
-import streamlit as st
-from langchain_huggingface import HuggingFaceEndpoint
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import FAISS
-from langchain_huggingface import HuggingFaceEmbeddings
-from langchain.chains import RetrievalQA
 import os
-import tempfile
+import io
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import PyPDF2
+from docx import Document
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings, HuggingFaceEndpoint, ChatHuggingFace
+from langchain.chains import RetrievalQA
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.prompts import PromptTemplate
 
-# 1. Page Config
-st.set_page_config(page_title="Ask the Doc", layout="wide")
-st.title("🤖 Ask the Doc (Flan-T5 Edition)")
+app = Flask(__name__)
+CORS(app)
 
-# 2. Sidebar for Secrets
-with st.sidebar:
-    st.header("Setup")
-    hf_token = st.text_input("Hugging Face Token", type="password")
-    if not hf_token and "HF_TOKEN" in st.secrets:
-        hf_token = st.secrets["HF_TOKEN"]
-    
-    st.markdown("---")
-    st.markdown("### 💡 Why this model?")
-    st.info("We are using 'Flan-T5' because it is stable on the free tier and reads documents without 'Task Not Supported' errors.")
+# Ensure your Hugging Face Token has 'Inference' permissions enabled
+# Replace your actual token string with this:
+hf_token = os.getenv("HF_TOKEN")
 
-# 3. File Uploader
-uploaded_file = st.file_uploader("Upload a PDF or Word Doc", type=["pdf", "docx"])
+vector_db = None
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-if uploaded_file and hf_token:
+template = """Answer the question based ONLY on the following context. If you don't know, say you don't know.
+Context: {context}
+Question: {question}
+Answer:"""
+PROMPT = PromptTemplate(template=template, input_variables=["context", "question"])
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    global vector_db
     try:
-        # Save file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as tmp:
-            tmp.write(uploaded_file.getvalue())
-            tmp_path = tmp.name
+        file = request.files['file']
+        filename = file.filename.lower()
+        file_content = ""
 
-        # Load Document
-        with st.spinner("Reading file..."):
-            if uploaded_file.name.endswith(".pdf"):
-                loader = PyPDFLoader(tmp_path)
-                docs = loader.load()
-            else:
-                loader = Docx2txtLoader(tmp_path)
-                docs = loader.load()
+        if filename.endswith('.pdf'):
+            pdf_reader = PyPDF2.PdfReader(file)
+            file_content = "".join([p.extract_text() or "" for p in pdf_reader.pages])
+        elif filename.endswith('.docx'):
+            doc = Document(io.BytesIO(file.read()))
+            file_content = "\n".join([para.text for para in doc.paragraphs])
+        elif filename.endswith('.txt'):
+            file_content = file.read().decode('utf-8')
+        else:
+            return jsonify({"error": "Unsupported format"}), 400
+
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        docs = text_splitter.split_text(file_content)
+        
+        if vector_db is None:
+            vector_db = FAISS.from_texts(docs, embeddings)
+        else:
+            vector_db.add_texts(docs)
             
-            # CRITICAL FIX: Smaller chunks to prevent "Context Length" crashes
-            text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=250,  # Tiny chunks to fit in memory
-                chunk_overlap=50
-            )
-            splits = text_splitter.split_documents(docs)
-
-            # Create Vector DB
-            embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-            vectorstore = FAISS.from_documents(splits, embeddings)
-            
-            # Setup LLM - Google Flan-T5 Large (Stable & Free)
-            llm = HuggingFaceEndpoint(
-                repo_id="google/flan-t5-large",
-                huggingfacehub_api_token=hf_token,
-                temperature=0.1,
-                max_new_tokens=200
-            )
-
-            # Create Chain
-            qa_chain = RetrievalQA.from_chain_type(
-                llm=llm,
-                retriever=vectorstore.as_retriever(search_kwargs={"k": 2}) # Only get 2 best chunks
-            )
-
-            st.success("✅ File processed! Ask away.")
-            
-            # Chat Interface
-            if "messages" not in st.session_state:
-                st.session_state.messages = []
-
-            for message in st.session_state.messages:
-                with st.chat_message(message["role"]):
-                    st.markdown(message["content"])
-
-            if prompt := st.chat_input("Ask a question about your document..."):
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-
-                with st.chat_message("assistant"):
-                    with st.spinner("Thinking..."):
-                        response = qa_chain.invoke({"query": prompt})
-                        st.markdown(response["result"])
-                        st.session_state.messages.append({"role": "assistant", "content": response["result"]})
-
+        return jsonify({"message": f"Indexed {file.filename}"})
     except Exception as e:
-        st.error(f"An error occurred: {e}")
+        return jsonify({"error": str(e)}), 500
 
-elif not hf_token:
-    st.warning("Please enter your Hugging Face Token to continue.")
+@app.route('/delete_file', methods=['POST'])
+def delete_file():
+    global vector_db
+    # For this local FAISS implementation, deleting resets the session
+    vector_db = None 
+    return jsonify({"message": "Knowledge base reset."})
+
+@app.route('/ask', methods=['POST'])
+def ask():
+    global vector_db
+    if not vector_db:
+        return jsonify({"answer": "Please upload a document first!"})
+    try:
+        data = request.get_json()
+        llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", task="conversational")
+        chat_model = ChatHuggingFace(llm=llm)
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=chat_model, retriever=vector_db.as_retriever(), chain_type_kwargs={"prompt": PROMPT}
+        )
+        response = qa_chain.invoke(data.get('question'))
+        return jsonify({"answer": response["result"]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == '__main__':
+    app.run(host='127.0.0.1', port=5000, debug=True)
