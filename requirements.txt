@@ -1,9 +1,8 @@
-streamlit
-langchain-huggingface
-langchain-community
-langchain
-python-dotenv
+fastapi
+uvicorn
+numpy
 faiss-cpu
 PyPDF2
 python-docx
-huggingface-hub
+sentence-transformers
+huggingface-hub>=0.24.0
