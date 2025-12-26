@@ -7,4 +7,5 @@ faiss-cpu
 python-dotenv
 gunicorn
 python-docx
-langchain-community
+langchain-communitylangchain==0.2.16
+langchain-community==0.2.16
