@@ -1,8 +1,0 @@
-flask
-flask-cors
-PyPDF2
-langchain
-langchain-huggingface
-faiss-cpu
-python-dotenv
-gunicorn
