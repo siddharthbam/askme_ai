@@ -1,9 +1,0 @@
-streamlit
-langchain-huggingface
-langchain-community
-langchain
-python-dotenv
-faiss-cpu
-PyPDF2
-python-docx
-huggingface-hub
