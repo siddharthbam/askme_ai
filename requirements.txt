@@ -1,8 +1,7 @@
-fastapi
-uvicorn
-numpy
-faiss-cpu
+flask
+flask-cors
 PyPDF2
-python-docx
-sentence-transformers
-huggingface-hub>=0.24.0
+langchain
+langchain-huggingface
+faiss-cpu
+python-dotenv

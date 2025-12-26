@@ -1,176 +1,85 @@
 import os
 import io
-from typing import List, Optional
-
-import numpy as np
-import faiss
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 import PyPDF2
-from docx import Document as DocxDocument
-from sentence_transformers import SentenceTransformer
-from fastapi import FastAPI, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from huggingface_hub import InferenceClient
+from docx import Document
+from langchain_community.vectorstores import FAISS
+from langchain_huggingface import HuggingFaceEmbeddings, HuggingFaceEndpoint, ChatHuggingFace
+from langchain.chains import RetrievalQA
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.prompts import PromptTemplate
 
-# -----------------------
-# Config
-# -----------------------
-HF_TOKEN = os.getenv("HF_TOKEN")
-LLM_MODEL = os.getenv("LLM_MODEL", "mistralai/Mistral-7B-Instruct-v0.3")
+app = Flask(__name__)
+CORS(app)
 
-EMBED_MODEL = os.getenv("EMBED_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "200"))
-OVERLAP = int(os.getenv("OVERLAP", "50"))
+# Ensure your Hugging Face Token has 'Inference' permissions enabled
+# Replace your actual token string with this:
+hf_token = os.getenv("HF_TOKEN")
 
-# -----------------------
-# App
-# -----------------------
-app = FastAPI(title="AskMe AI Backend")
+vector_db = None
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # tighten later
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# -----------------------
-# In-memory stores
-# -----------------------
-embedder = SentenceTransformer(EMBED_MODEL, device="cpu")
-dim = embedder.get_sentence_embedding_dimension()
-index = faiss.IndexFlatIP(dim)
-
-chunks: List[str] = []
-sources: List[str] = []
-
-hf = InferenceClient(token=HF_TOKEN)
-
-PROMPT_TEMPLATE = """Answer the question based ONLY on the following context. If you don't know, say you don't know.
-
-Context:
-{context}
-
+template = """Answer the question based ONLY on the following context. If you don't know, say you don't know.
+Context: {context}
 Question: {question}
-
 Answer:"""
+PROMPT = PromptTemplate(template=template, input_variables=["context", "question"])
 
-def normalize(x: np.ndarray) -> np.ndarray:
-    n = np.linalg.norm(x, axis=1, keepdims=True)
-    n[n == 0] = 1e-9
-    return x / n
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    global vector_db
+    try:
+        file = request.files['file']
+        filename = file.filename.lower()
+        file_content = ""
 
-def chunk_text(text: str, chunk_size=CHUNK_SIZE, overlap=OVERLAP) -> List[str]:
-    words = text.split()
-    out = []
-    start = 0
-    while start < len(words):
-        out.append(" ".join(words[start:start + chunk_size]))
-        start += max(1, chunk_size - overlap)
-    return [c for c in out if c.strip()]
+        if filename.endswith('.pdf'):
+            pdf_reader = PyPDF2.PdfReader(file)
+            file_content = "".join([p.extract_text() or "" for p in pdf_reader.pages])
+        elif filename.endswith('.docx'):
+            doc = Document(io.BytesIO(file.read()))
+            file_content = "\n".join([para.text for para in doc.paragraphs])
+        elif filename.endswith('.txt'):
+            file_content = file.read().decode('utf-8')
+        else:
+            return jsonify({"error": "Unsupported format"}), 400
 
-def read_pdf(data: bytes) -> str:
-    reader = PyPDF2.PdfReader(io.BytesIO(data))
-    return "\n".join([(p.extract_text() or "") for p in reader.pages])
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        docs = text_splitter.split_text(file_content)
+        
+        if vector_db is None:
+            vector_db = FAISS.from_texts(docs, embeddings)
+        else:
+            vector_db.add_texts(docs)
+            
+        return jsonify({"message": f"Indexed {file.filename}"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-def read_docx(data: bytes) -> str:
-    doc = DocxDocument(io.BytesIO(data))
-    return "\n".join([p.text for p in doc.paragraphs])
-
-def read_txt(data: bytes) -> str:
-    return data.decode("utf-8", errors="ignore")
-
-def add_chunks(text_chunks: List[str], source: str):
-    if not text_chunks:
-        return
-
-    embs = embedder.encode(text_chunks, convert_to_numpy=True, show_progress_bar=False)
-    embs = normalize(embs).astype("float32")
-
-    index.add(embs)
-    chunks.extend(text_chunks)
-    sources.extend([source] * len(text_chunks))
-
-def retrieve(question: str, k: int):
-    if len(chunks) == 0:
-        return [], []
-
-    q = embedder.encode([question], convert_to_numpy=True, show_progress_bar=False)
-    q = normalize(q).astype("float32")
-
-    D, I = index.search(q, k)
-    ctx = []
-    evid = []
-    for score, idx in zip(D[0], I[0]):
-        if 0 <= idx < len(chunks):
-            ctx.append(chunks[idx])
-            evid.append({"source": sources[idx], "score": float(score), "chunk": chunks[idx]})
-    return ctx, evid
-
-def answer_with_llm(question: str, context_chunks: List[str]) -> str:
-    if not HF_TOKEN:
-        return "HF_TOKEN missing on backend. Add it to environment variables/secrets."
-
-    context = "\n\n---\n\n".join(context_chunks[:4])
-    if len(context) > 12000:
-        context = context[:12000] + "\n\n[Truncated]"
-
-    prompt = PROMPT_TEMPLATE.format(context=context, question=question)
-
-    resp = hf.chat.completions.create(
-        model=LLM_MODEL,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=350,
-        temperature=0.2,
-    )
-    return resp.choices[0].message.content.strip()
-
-# -----------------------
-# API
-# -----------------------
-@app.get("/health")
-def health():
-    return {"ok": True, "chunks": len(chunks)}
-
-@app.post("/delete_file")
+@app.route('/delete_file', methods=['POST'])
 def delete_file():
-    global index, chunks, sources
-    index = faiss.IndexFlatIP(dim)
-    chunks = []
-    sources = []
-    return {"message": "Knowledge base reset."}
+    global vector_db
+    # For this local FAISS implementation, deleting resets the session
+    vector_db = None 
+    return jsonify({"message": "Knowledge base reset."})
 
-@app.post("/upload")
-async def upload(file: UploadFile = File(...)):
-    data = await file.read()
-    name = (file.filename or "uploaded").lower()
+@app.route('/ask', methods=['POST'])
+def ask():
+    global vector_db
+    if not vector_db:
+        return jsonify({"answer": "Please upload a document first!"})
+    try:
+        data = request.get_json()
+        llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", task="conversational")
+        chat_model = ChatHuggingFace(llm=llm)
+        qa_chain = RetrievalQA.from_chain_type(
+            llm=chat_model, retriever=vector_db.as_retriever(), chain_type_kwargs={"prompt": PROMPT}
+        )
+        response = qa_chain.invoke(data.get('question'))
+        return jsonify({"answer": response["result"]})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    if name.endswith(".pdf"):
-        text = read_pdf(data)
-    elif name.endswith(".docx"):
-        text = read_docx(data)
-    elif name.endswith(".txt"):
-        text = read_txt(data)
-    else:
-        return {"error": "Unsupported format"}
-
-    parts = chunk_text(text)
-    add_chunks(parts, file.filename or "uploaded")
-    return {"message": f"Indexed {file.filename}", "added_chunks": len(parts), "total_chunks": len(chunks)}
-
-class AskBody(BaseModel):
-    question: str
-    top_k: Optional[int] = 4
-
-@app.post("/ask")
-def ask(body: AskBody):
-    if len(chunks) == 0:
-        return {"answer": "Please upload a document first!"}
-
-    ctx, evid = retrieve(body.question, body.top_k or 4)
-    if not ctx:
-        return {"answer": "No relevant context found in the documents.", "evidence": []}
-
-    ans = answer_with_llm(body.question, ctx)
-    return {"answer": ans, "evidence": evid}
+if __name__ == '__main__':
+    app.run(host='127.0.0.1', port=5000, debug=True)
